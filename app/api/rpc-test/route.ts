@@ -1,28 +1,31 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { createClient } from "@/lib/supabase/server"
 
 export async function POST(req: NextRequest) {
   const { sessionId } = await req.json()
-  const SUPABASE_URL = process.env.SUPABASE_URL
-  const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-  // Handle missing environment variables gracefully
-  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     return NextResponse.json(
       {
         error: "Supabase configuration missing",
-        details: `Missing environment variables: ${!SUPABASE_URL ? "SUPABASE_URL " : ""}${!SERVICE_ROLE_KEY ? "SUPABASE_SERVICE_ROLE_KEY" : ""}`,
-        supabaseHost: SUPABASE_URL ? new URL(SUPABASE_URL).host : "Not configured",
+        details: "NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables are required",
+        supabaseHost: "Not configured",
       },
       { status: 500 },
     )
   }
 
+  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
   const SUPABASE_HOST = new URL(SUPABASE_URL).host
 
   // First, run the connectivity probe
   try {
     const probe = await fetch(`${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/`, {
       method: "HEAD",
+      headers: {
+        apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!}`,
+      },
     })
     if (!probe.ok) throw new Error(`Probe HTTP status: ${probe.status}`)
   } catch (e) {
@@ -38,16 +41,7 @@ export async function POST(req: NextRequest) {
 
   // Then attempt the RPC call
   try {
-    // Import Supabase client dynamically to handle missing dependency gracefully
-    let createClient
-    try {
-      const supabaseModule = await import("@supabase/supabase-js")
-      createClient = supabaseModule.createClient
-    } catch (importError) {
-      throw new Error("Supabase client library not available. Install @supabase/supabase-js to test RPC calls.")
-    }
-
-    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
+    const supabase = await createClient()
     const { data, error } = await supabase.rpc("calibrate_session_v1", {
       p_session_id: sessionId,
     })
@@ -58,6 +52,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       result: data,
       supabaseHost: SUPABASE_HOST,
+      message: "RPC call successful",
     })
   } catch (e) {
     return NextResponse.json(
